@@ -11,7 +11,7 @@ function App() {
 
   const fetchTodos = async () => {
     try {
-      const response = await axios.get('http://localhost:8090/api/todos');
+      const response = await axios.get(`${process.env.REACT_APP_TODO_API}/api/todos`);
       setTodos(response.data);
     } catch (error) {
       console.error('Failed to fetch todos:', error);
@@ -20,7 +20,7 @@ function App() {
 
   const markTodoAsDone = async (id) => {
     try {
-      await axios.put(`http://localhost:8090/api/todos/${id}`, { status: true });
+      await axios.put(`${process.env.REACT_APP_TODO_API}/api/todos/${id}`, { status: true });
       // Update the todos state with the updated todo item
       setTodos(prevTodos =>
         prevTodos.map(todo =>
@@ -34,7 +34,7 @@ function App() {
 
   const deleteTodo = async (id) => {
     try {
-      await axios.delete(`http://localhost:8090/api/todos/${id}`);
+      await axios.delete(`${process.env.REACT_APP_TODO_API}/api/todos/${id}`);
       fetchTodos();
     } catch (error) {
       console.error('Failed to delete todo:', error);
@@ -45,7 +45,7 @@ function App() {
     e.preventDefault();
     if (!task.trim()) return;
     try {
-      await axios.post('http://localhost:8090/api/todos', { task, status: false });
+      await axios.post(`${process.env.REACT_APP_TODO_API}/api/todos`, { task, status: false });
       setTask('');
       fetchTodos();
     } catch (error) {
@@ -59,7 +59,7 @@ function App() {
         <h1>Todo List</h1>
       </div>
       <form onSubmit={addTodo}>
-        <input type="text" value={task} onChange={(e) => setTask(e.target.value)} style={{ width: '' }} />
+        <input type="text" value={task} onChange={(e) => setTask(e.target.value)} />
         <button type="submit">Add Todo</button>
       </form>
       <ul>

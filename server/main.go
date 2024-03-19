@@ -5,10 +5,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/rds"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v4"
+	"github.com/joho/godotenv"
 )
 
 type Todo struct {
@@ -17,18 +23,61 @@ type Todo struct {
 	Status bool   `json:"status"`
 }
 
-var db *pgx.Conn
-
 func main() {
+	godotenv.Load()
+	// Create a new AWS session
+	cfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithRegion(os.Getenv("AWS_REGION")),
+		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(
+			os.Getenv("AWS_ACCESS_KEY_ID"),
+			os.Getenv("AWS_SECRET_ACCESS_KEY"),
+			os.Getenv("AWS_SESSION_TOKEN"),
+		)),
+	)
 
+	if err != nil {
+		log.Fatalf("Unable to load AWS SDK config: %v", err)
+	}
+
+	// Create a new AWS RDS client
+	svc := rds.NewFromConfig(cfg)
+
+	// Define the name of your RDS instance
+	instanceName := os.Getenv("DB_IDENTIFIER")
+
+	// Create a DescribeDBInstances input
+	input := &rds.DescribeDBInstancesInput{
+		DBInstanceIdentifier: aws.String(instanceName),
+	}
+
+	// Retrieve information about the RDS instance
+	result, err := svc.DescribeDBInstances(context.TODO(), input)
+	if err != nil {
+		log.Fatalf("Failed to describe RDS instance: %v", err)
+	}
+
+	// Ensure that the result contains at least one DB instance
+	if len(result.DBInstances) == 0 {
+		log.Fatalf("No DB instance found with the name: %s", instanceName)
+	}
+
+	// Extract the RDS endpoint from the first DB instance in the result
+	endpoint := *result.DBInstances[0].Endpoint.Address
+
+	connString := fmt.Sprintf("postgresql://%s:%s@%s:%s/%s",
+		os.Getenv("DB_USERNAME"),
+		os.Getenv("DB_PASSWORD"),
+		endpoint,
+		os.Getenv("DB_PORT"),
+		os.Getenv("DB_NAME"))
 	// Connect to PostgreSQL
-	connString := "postgres://postgres:postgres@localhost:5432/todoapp"
 	conn, err := pgx.Connect(context.Background(), connString)
+
 	if err != nil {
 		log.Fatalf("Unable to connect to database: %v\n", err)
 	}
 	defer conn.Close(context.Background())
-	db = conn
+
 	fmt.Println("Connected to database")
 
 	router := gin.Default()
@@ -39,7 +88,7 @@ func main() {
 
 	// GET route to list all todos
 	router.GET("/api/todos", func(c *gin.Context) {
-		rows, err := db.Query(context.Background(), "SELECT id, task, status FROM todos")
+		rows, err := conn.Query(context.Background(), "SELECT id, task, status FROM todos")
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -68,7 +117,7 @@ func main() {
 		}
 
 		// Insert into PostgreSQL
-		_, err := db.Exec(context.Background(), "INSERT INTO todos (task, status) VALUES ($1, $2)", todo.Task, todo.Status)
+		_, err := conn.Exec(context.Background(), "INSERT INTO todos (task, status) VALUES ($1, $2)", todo.Task, todo.Status)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -83,7 +132,7 @@ func main() {
 
 		// Check if todo exists
 		var count int
-		err := db.QueryRow(context.Background(), "SELECT COUNT(*) FROM todos WHERE id = $1", id).Scan(&count)
+		err := conn.QueryRow(context.Background(), "SELECT COUNT(*) FROM todos WHERE id = $1", id).Scan(&count)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -100,7 +149,7 @@ func main() {
 		}
 
 		// Update the todo
-		_, err = db.Exec(context.Background(), "UPDATE todos SET task = $1, status = $2 WHERE id = $3", updatedTodo.Task, updatedTodo.Status, id)
+		_, err = conn.Exec(context.Background(), "UPDATE todos SET task = $1, status = $2 WHERE id = $3", updatedTodo.Task, updatedTodo.Status, id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -115,7 +164,7 @@ func main() {
 
 		// Check if todo exists
 		var count int
-		err := db.QueryRow(context.Background(), "SELECT COUNT(*) FROM todos WHERE id = $1", id).Scan(&count)
+		err := conn.QueryRow(context.Background(), "SELECT COUNT(*) FROM todos WHERE id = $1", id).Scan(&count)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
@@ -126,7 +175,7 @@ func main() {
 		}
 
 		// Delete the todo
-		_, err = db.Exec(context.Background(), "DELETE FROM todos WHERE id = $1", id)
+		_, err = conn.Exec(context.Background(), "DELETE FROM todos WHERE id = $1", id)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 			return
